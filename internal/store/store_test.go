@@ -9,98 +9,193 @@ import (
 	"time"
 )
 
-func TestStoreCreateUpdateDeleteAndPersist(t *testing.T) {
+func TestStoreListsItemsAreScopedAndPersisted(t *testing.T) {
 	filePath := filepath.Join(t.TempDir(), "data", "shopping-list.json")
 	s, err := New(filePath)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 	s.now = fixedClock()
-	s.newID = sequenceID("item-1")
+	s.newID = sequenceID("home", "weekend", "item-home", "item-weekend")
 
-	item, err := s.Create(CreateItem{Name: "  Chleb  ", Note: "  2 szt  "})
+	home, err := s.CreateList(CreateList{Name: "  Dom  "})
 	if err != nil {
-		t.Fatalf("Create() error = %v", err)
+		t.Fatalf("CreateList(home) error = %v", err)
 	}
-	if item.Name != "Chleb" || item.Note != "2 szt" || item.Completed {
-		t.Fatalf("Create() item = %+v", item)
+	weekend, err := s.CreateList(CreateList{Name: "Weekend"})
+	if err != nil {
+		t.Fatalf("CreateList(weekend) error = %v", err)
+	}
+
+	homeItem, err := s.CreateItem(home.ID, CreateItem{Name: "  Chleb  ", Note: "  2 szt  "})
+	if err != nil {
+		t.Fatalf("CreateItem(home) error = %v", err)
+	}
+	weekendItem, err := s.CreateItem(weekend.ID, CreateItem{Name: "Kawa"})
+	if err != nil {
+		t.Fatalf("CreateItem(weekend) error = %v", err)
+	}
+	if homeItem.Name != "Chleb" || homeItem.Note != "2 szt" {
+		t.Fatalf("home item = %+v", homeItem)
 	}
 
 	done := true
 	name := "Chleb razowy"
-	updated, err := s.Update(item.ID, UpdateItem{Name: &name, Completed: &done})
+	updated, err := s.UpdateItem(home.ID, homeItem.ID, UpdateItem{Name: &name, Completed: &done})
 	if err != nil {
-		t.Fatalf("Update() error = %v", err)
+		t.Fatalf("UpdateItem(home) error = %v", err)
 	}
 	if updated.Name != name || !updated.Completed {
-		t.Fatalf("Update() item = %+v", updated)
+		t.Fatalf("updated item = %+v", updated)
+	}
+
+	homeItems, err := s.ListItems(home.ID)
+	if err != nil {
+		t.Fatalf("ListItems(home) error = %v", err)
+	}
+	weekendItems, err := s.ListItems(weekend.ID)
+	if err != nil {
+		t.Fatalf("ListItems(weekend) error = %v", err)
+	}
+	if len(homeItems) != 1 || homeItems[0].ID != homeItem.ID {
+		t.Fatalf("home items = %+v", homeItems)
+	}
+	if len(weekendItems) != 1 || weekendItems[0].ID != weekendItem.ID {
+		t.Fatalf("weekend items = %+v", weekendItems)
 	}
 
 	reloaded, err := New(filePath)
 	if err != nil {
 		t.Fatalf("reload New() error = %v", err)
 	}
-	items := reloaded.List()
-	if len(items) != 1 || items[0].Name != name || !items[0].Completed {
-		t.Fatalf("reloaded items = %+v", items)
+	lists := reloaded.Lists()
+	if len(lists) != 3 {
+		t.Fatalf("reloaded lists len = %d, want 3; lists = %+v", len(lists), lists)
+	}
+	if lists[1].Name != "Dom" || lists[1].TotalCount != 1 || lists[1].DoneCount != 1 {
+		t.Fatalf("reloaded home summary = %+v", lists[1])
 	}
 
-	if err := reloaded.Delete(item.ID); err != nil {
-		t.Fatalf("Delete() error = %v", err)
+	if err := reloaded.DeleteItem(weekend.ID, weekendItem.ID); err != nil {
+		t.Fatalf("DeleteItem() error = %v", err)
 	}
-	if got := reloaded.List(); len(got) != 0 {
-		t.Fatalf("List() after delete = %+v", got)
+	weekendItems, err = reloaded.ListItems(weekend.ID)
+	if err != nil {
+		t.Fatalf("ListItems(weekend after delete) error = %v", err)
+	}
+	if len(weekendItems) != 0 {
+		t.Fatalf("weekend items after delete = %+v", weekendItems)
 	}
 
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
-	var persisted []Item
+	var persisted DataFile
 	if err := json.Unmarshal(data, &persisted); err != nil {
 		t.Fatalf("persisted JSON invalid: %v", err)
 	}
-	if len(persisted) != 0 {
-		t.Fatalf("persisted items = %+v", persisted)
+	if len(persisted.Lists) != 3 || persisted.Lists[1].Items[0].Name != name {
+		t.Fatalf("persisted data = %+v", persisted)
 	}
 }
 
-func TestStoreValidationAndClearCompleted(t *testing.T) {
+func TestStoreValidationClearCompletedAndDeleteLastList(t *testing.T) {
 	filePath := filepath.Join(t.TempDir(), "shopping-list.json")
 	s, err := New(filePath)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 	s.now = fixedClock()
-	s.newID = sequenceID("a", "b")
+	s.newID = sequenceID("a", "b", "replacement")
+	defaultID := s.DefaultListID()
 
-	if _, err := s.Create(CreateItem{Name: " "}); !errors.Is(err, ErrEmptyName) {
-		t.Fatalf("Create(empty) error = %v, want ErrEmptyName", err)
+	if _, err := s.CreateItem(defaultID, CreateItem{Name: " "}); !errors.Is(err, ErrEmptyName) {
+		t.Fatalf("CreateItem(empty) error = %v, want ErrEmptyName", err)
 	}
 
-	first, err := s.Create(CreateItem{Name: "Mleko"})
+	first, err := s.CreateItem(defaultID, CreateItem{Name: "Mleko"})
 	if err != nil {
-		t.Fatalf("Create(first) error = %v", err)
+		t.Fatalf("CreateItem(first) error = %v", err)
 	}
-	second, err := s.Create(CreateItem{Name: "Jablka"})
+	second, err := s.CreateItem(defaultID, CreateItem{Name: "Jablka"})
 	if err != nil {
-		t.Fatalf("Create(second) error = %v", err)
+		t.Fatalf("CreateItem(second) error = %v", err)
 	}
 
 	done := true
-	if _, err := s.Update(first.ID, UpdateItem{Completed: &done}); err != nil {
-		t.Fatalf("Update(completed) error = %v", err)
+	if _, err := s.UpdateItem(defaultID, first.ID, UpdateItem{Completed: &done}); err != nil {
+		t.Fatalf("UpdateItem(completed) error = %v", err)
 	}
-	removed, err := s.ClearCompleted()
+	removed, err := s.ClearCompletedItems(defaultID)
 	if err != nil {
-		t.Fatalf("ClearCompleted() error = %v", err)
+		t.Fatalf("ClearCompletedItems() error = %v", err)
 	}
 	if removed != 1 {
-		t.Fatalf("ClearCompleted() removed = %d, want 1", removed)
+		t.Fatalf("ClearCompletedItems() removed = %d, want 1", removed)
 	}
-	items := s.List()
+	items, err := s.ListItems(defaultID)
+	if err != nil {
+		t.Fatalf("ListItems() error = %v", err)
+	}
 	if len(items) != 1 || items[0].ID != second.ID {
-		t.Fatalf("List() after clear = %+v", items)
+		t.Fatalf("ListItems() after clear = %+v", items)
+	}
+
+	if err := s.DeleteList(defaultID); err != nil {
+		t.Fatalf("DeleteList(last) error = %v", err)
+	}
+	lists := s.Lists()
+	if len(lists) != 1 || lists[0].Name != DefaultListName || lists[0].TotalCount != 0 {
+		t.Fatalf("Lists() after deleting last = %+v", lists)
+	}
+	if lists[0].ID == defaultID {
+		t.Fatalf("replacement list reused deleted id %q", defaultID)
+	}
+}
+
+func TestStoreMigratesLegacyItems(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "shopping-list.json")
+	legacyItems := []Item{{
+		ID:        "legacy-item",
+		Name:      "Makaron",
+		CreatedAt: fixedClock()(),
+		UpdatedAt: fixedClock()(),
+	}}
+	data, err := json.Marshal(legacyItems)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if err := os.WriteFile(filePath, data, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	s, err := New(filePath)
+	if err != nil {
+		t.Fatalf("New(legacy) error = %v", err)
+	}
+	lists := s.Lists()
+	if len(lists) != 1 || lists[0].Name != DefaultListName || lists[0].TotalCount != 1 {
+		t.Fatalf("migrated lists = %+v", lists)
+	}
+	items, err := s.ListItems(lists[0].ID)
+	if err != nil {
+		t.Fatalf("ListItems(migrated) error = %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "legacy-item" {
+		t.Fatalf("migrated items = %+v", items)
+	}
+
+	persisted, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	var document DataFile
+	if err := json.Unmarshal(persisted, &document); err != nil {
+		t.Fatalf("persisted migrated JSON invalid: %v", err)
+	}
+	if len(document.Lists) != 1 || len(document.Lists[0].Items) != 1 {
+		t.Fatalf("persisted migrated document = %+v", document)
 	}
 }
 

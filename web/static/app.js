@@ -1,9 +1,21 @@
+const activeListStorageKey = "shopping-list.activeListId";
+
 const state = {
+  lists: [],
   items: [],
+  activeListId: window.localStorage.getItem(activeListStorageKey) || null,
   editingId: null,
 };
 
 const els = {
+  createListForm: document.querySelector("#createListForm"),
+  newListName: document.querySelector("#newListName"),
+  listsPanel: document.querySelector("#listsPanel"),
+  renameListForm: document.querySelector("#renameListForm"),
+  activeListName: document.querySelector("#activeListName"),
+  deleteList: document.querySelector("#deleteList"),
+  activeListTitle: document.querySelector("#activeListTitle"),
+  composerListName: document.querySelector("#composerListName"),
   addForm: document.querySelector("#addForm"),
   nameInput: document.querySelector("#nameInput"),
   noteInput: document.querySelector("#noteInput"),
@@ -43,10 +55,114 @@ async function api(path, options = {}) {
   return response.json();
 }
 
+function activeList() {
+  return state.lists.find((list) => list.id === state.activeListId) || state.lists[0] || null;
+}
+
+function itemsPath() {
+  const list = activeList();
+  if (!list) throw new Error("Brak aktywnej listy.");
+  return `/api/lists/${encodeURIComponent(list.id)}/items`;
+}
+
+async function loadLists(preferredListId = state.activeListId) {
+  state.lists = await api("/api/lists");
+  const preferred = state.lists.find((list) => list.id === preferredListId);
+  state.activeListId = (preferred || state.lists[0] || {}).id || null;
+  if (state.activeListId) {
+    window.localStorage.setItem(activeListStorageKey, state.activeListId);
+  } else {
+    window.localStorage.removeItem(activeListStorageKey);
+  }
+}
+
 async function loadItems() {
-  try {
-    state.items = await api("/api/items");
+  const list = activeList();
+  if (!list) {
+    state.items = [];
     render();
+    return;
+  }
+  state.items = await api(`/api/lists/${encodeURIComponent(list.id)}/items`);
+  render();
+}
+
+async function refresh(preferredListId = state.activeListId) {
+  try {
+    await loadLists(preferredListId);
+    await loadItems();
+  } catch (error) {
+    showMessage(error.message, true);
+  }
+}
+
+async function selectList(id) {
+  if (id === state.activeListId) return;
+  state.activeListId = id;
+  state.editingId = null;
+  window.localStorage.setItem(activeListStorageKey, id);
+  await loadItems();
+}
+
+async function createList(event) {
+  event.preventDefault();
+  const name = els.newListName.value.trim();
+  if (!name) {
+    els.newListName.focus();
+    return;
+  }
+
+  setBusy(els.createListForm, true);
+  try {
+    const list = await api("/api/lists", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+    els.createListForm.reset();
+    showMessage("Dodano listę.");
+    await refresh(list.id);
+  } catch (error) {
+    showMessage(error.message, true);
+  } finally {
+    setBusy(els.createListForm, false);
+  }
+}
+
+async function renameList(event) {
+  event.preventDefault();
+  const list = activeList();
+  if (!list) return;
+
+  const name = els.activeListName.value.trim();
+  if (!name) {
+    els.activeListName.focus();
+    return;
+  }
+
+  setBusy(els.renameListForm, true);
+  try {
+    await api(`/api/lists/${encodeURIComponent(list.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    });
+    showMessage("Zmieniono nazwę listy.");
+    await refresh(list.id);
+  } catch (error) {
+    showMessage(error.message, true);
+  } finally {
+    setBusy(els.renameListForm, false);
+  }
+}
+
+async function deleteActiveList() {
+  const list = activeList();
+  if (!list) return;
+  if (!window.confirm(`Usunąć listę "${list.name}"?`)) return;
+
+  try {
+    await api(`/api/lists/${encodeURIComponent(list.id)}`, { method: "DELETE" });
+    showMessage("Usunięto listę.");
+    await refresh();
   } catch (error) {
     showMessage(error.message, true);
   }
@@ -63,7 +179,7 @@ async function addItem(event) {
 
   setBusy(els.addForm, true);
   try {
-    const item = await api("/api/items", {
+    const item = await api(itemsPath(), {
       method: "POST",
       body: JSON.stringify({ name, note }),
     });
@@ -71,6 +187,7 @@ async function addItem(event) {
     els.addForm.reset();
     els.nameInput.focus();
     showMessage("Dodano pozycję.");
+    await loadLists(state.activeListId);
     render();
   } catch (error) {
     showMessage(error.message, true);
@@ -88,11 +205,12 @@ async function updateItem(id, patch) {
   render();
 
   try {
-    const saved = await api(`/api/items/${encodeURIComponent(id)}`, {
+    const saved = await api(`${itemsPath()}/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
     });
     state.items[index] = saved;
+    await loadLists(state.activeListId);
     render();
   } catch (error) {
     state.items[index] = previous;
@@ -111,8 +229,10 @@ async function deleteItem(id) {
   render();
 
   try {
-    await api(`/api/items/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await api(`${itemsPath()}/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await loadLists(state.activeListId);
     showMessage("Usunięto pozycję.");
+    render();
   } catch (error) {
     state.items = previous;
     render();
@@ -130,8 +250,10 @@ async function clearCompleted() {
   render();
 
   try {
-    const result = await api("/api/items/clear-completed", { method: "POST" });
+    const result = await api(`${itemsPath()}/clear-completed`, { method: "POST" });
+    await loadLists(state.activeListId);
     showMessage(`Wyczyszczono kupione: ${result.removed}.`);
+    render();
   } catch (error) {
     state.items = previous;
     render();
@@ -140,14 +262,21 @@ async function clearCompleted() {
 }
 
 function render() {
+  renderLists();
+
+  const list = activeList();
   const total = state.items.length;
   const done = state.items.filter((item) => item.completed).length;
   const open = total - done;
 
+  els.activeListTitle.textContent = list?.name || "Lista zakupów";
+  els.composerListName.textContent = list?.name || "Lista zakupów";
+  els.activeListName.value = list?.name || "";
   els.totalCount.textContent = total;
   els.openCount.textContent = open;
   els.doneCount.textContent = done;
-  els.clearCompleted.disabled = done === 0;
+  els.clearCompleted.disabled = done === 0 || !list;
+  els.addForm.querySelector("button[type='submit']").disabled = !list;
   els.emptyState.hidden = total !== 0;
   els.itemsList.innerHTML = "";
 
@@ -158,6 +287,23 @@ function render() {
 
   for (const item of sorted) {
     els.itemsList.appendChild(renderItem(item));
+  }
+}
+
+function renderLists() {
+  els.listsPanel.innerHTML = "";
+  for (const list of state.lists) {
+    const button = document.createElement("button");
+    button.className = "list-tab";
+    button.type = "button";
+    button.setAttribute("role", "option");
+    button.setAttribute("aria-selected", String(list.id === state.activeListId));
+    button.classList.toggle("is-active", list.id === state.activeListId);
+    button.innerHTML = `<strong></strong><span></span>`;
+    button.querySelector("strong").textContent = list.name;
+    button.querySelector("span").textContent = `${list.openCount} do kupienia, ${list.doneCount} kupione`;
+    button.addEventListener("click", () => selectList(list.id));
+    els.listsPanel.appendChild(button);
   }
 }
 
@@ -245,6 +391,9 @@ function showMessage(text, isError = false) {
   }, 3200);
 }
 
+els.createListForm.addEventListener("submit", createList);
+els.renameListForm.addEventListener("submit", renameList);
+els.deleteList.addEventListener("click", deleteActiveList);
 els.addForm.addEventListener("submit", addItem);
 els.clearCompleted.addEventListener("click", clearCompleted);
-loadItems();
+refresh();

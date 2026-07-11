@@ -85,6 +85,7 @@ h1 {
 }
 
 .composer,
+.contexts,
 .stats,
 .list-shell {
   background: rgba(255, 255, 255, 0.84);
@@ -96,6 +97,85 @@ h1 {
 
 .composer {
   padding: 18px;
+}
+
+.composer h2,
+.contexts h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.composer h2 {
+  margin-bottom: 14px;
+}
+
+.contexts {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 18px;
+}
+
+.contexts-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.9fr);
+  gap: 14px;
+  align-items: end;
+}
+
+.list-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.lists-panel {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.list-tab {
+  display: grid;
+  gap: 3px;
+  min-width: 132px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.list-tab strong,
+.list-tab span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list-tab strong {
+  font-size: 0.95rem;
+}
+
+.list-tab span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.list-tab.is-active {
+  border-color: var(--primary);
+  background: var(--surface-strong);
+  box-shadow: 0 8px 20px rgba(20, 108, 99, 0.14);
+}
+
+.rename-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: end;
 }
 
 .add-form {
@@ -131,6 +211,7 @@ input[type="text"]:focus {
 
 .primary-button,
 .ghost-button,
+.danger-button,
 .icon-button {
   min-height: 44px;
   border: 0;
@@ -160,6 +241,17 @@ input[type="text"]:focus {
   background: var(--surface);
   color: var(--primary-dark);
   border: 1px solid var(--line);
+}
+
+.danger-button {
+  background: #fff;
+  color: var(--danger);
+  border: 1px solid rgba(180, 35, 24, 0.35);
+}
+
+.danger-button:hover {
+  transform: translateY(-1px);
+  background: #fff4f2;
 }
 
 .stats {
@@ -355,6 +447,9 @@ input[type="text"]:focus {
   }
 
   .topbar,
+  .contexts-header,
+  .list-form,
+  .rename-form,
   .add-form,
   .item,
   .edit-form {
@@ -364,6 +459,12 @@ input[type="text"]:focus {
   .topbar {
     display: grid;
     align-items: stretch;
+  }
+
+  .lists-panel {
+    display: grid;
+    grid-template-columns: 1fr;
+    overflow: visible;
   }
 
   .stats div {

@@ -10,13 +10,33 @@
     <main class="app">
       <header class="topbar">
         <div>
-          <p class="eyebrow">Wspólna lista</p>
-          <h1>Lista zakupów</h1>
+          <p class="eyebrow">Listy zakupowe</p>
+          <h1 id="activeListTitle">Lista zakupów</h1>
         </div>
         <button class="ghost-button" id="clearCompleted" type="button">Wyczyść kupione</button>
       </header>
 
+      <section class="contexts" aria-label="Listy zakupów">
+        <div class="contexts-header">
+          <h2>Twoje listy</h2>
+          <form id="createListForm" class="list-form">
+            <input id="newListName" name="name" type="text" autocomplete="off" maxlength="80" placeholder="np. Dom" required>
+            <button class="primary-button" type="submit">Dodaj listę</button>
+          </form>
+        </div>
+        <div id="listsPanel" class="lists-panel" role="listbox" aria-label="Wybierz listę zakupów"></div>
+        <form id="renameListForm" class="rename-form">
+          <label>
+            <span>Nazwa aktywnej listy</span>
+            <input id="activeListName" name="name" type="text" autocomplete="off" maxlength="80" required>
+          </label>
+          <button class="ghost-button" type="submit">Zmień nazwę</button>
+          <button class="danger-button" id="deleteList" type="button">Usuń listę</button>
+        </form>
+      </section>
+
       <section class="composer" aria-label="Dodaj produkt">
+        <h2>Dodaj do listy <span id="composerListName">Lista zakupów</span></h2>
         <form id="addForm" class="add-form">
           <label>
             <span>Nazwa</span>
@@ -50,7 +70,7 @@
       <section class="list-shell">
         <div id="emptyState" class="empty-state" hidden>
           <h2>Lista jest pusta</h2>
-          <p>Dodaj pierwszą pozycję, a będzie widoczna dla wszystkich użytkowników tej aplikacji.</p>
+          <p>Dodaj pierwszą pozycję w aktywnej liście.</p>
         </div>
         <ul id="itemsList" class="items-list" aria-label="Pozycje listy zakupow"></ul>
       </section>
