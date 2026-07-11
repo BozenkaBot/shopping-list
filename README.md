@@ -12,6 +12,22 @@ go run ./cmd/server
 
 Domyślnie aplikacja słucha na `:8080`, a frontend jest dostępny pod `http://localhost:8080/`.
 
+## Uruchomienie w Docker Compose
+
+```sh
+docker compose up -d --build
+```
+
+Aplikacja będzie dostępna pod `http://localhost:8080/`. Dane są trzymane w wolumenie `shopping_data`, więc przetrwają restart kontenera.
+
+Przydatne komendy:
+
+```sh
+docker compose logs -f
+docker compose down        # zatrzymuje kontener, wolumen zostaje
+docker compose down -v     # usuwa też dane listy zakupów
+```
+
 ## Konfiguracja
 
 - `ADDR` - adres serwera HTTP, domyślnie `:8080`.
