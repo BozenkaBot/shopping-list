@@ -12,7 +12,7 @@ import (
 
 func main() {
 	addr := getenv("ADDR", ":8080")
-	dbPath := getenv("DB_PATH", getenv("DATA_FILE", "data/shopping-list.sqlite"))
+	dbPath := getenv("DB_PATH", "data/shopping-list.sqlite")
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 

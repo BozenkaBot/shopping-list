@@ -544,30 +544,6 @@ func (s *Store) WaitForVersion(ctx context.Context, listID string, since uint64,
 	}
 }
 
-func (s *Store) List() []Item {
-	items, err := s.ListItems(s.DefaultListID())
-	if err != nil {
-		return []Item{}
-	}
-	return items
-}
-
-func (s *Store) Create(input CreateItem) (Item, error) {
-	return s.CreateItem(s.DefaultListID(), input)
-}
-
-func (s *Store) Update(id string, patch UpdateItem) (Item, error) {
-	return s.UpdateItem(s.DefaultListID(), id, patch)
-}
-
-func (s *Store) Delete(id string) error {
-	return s.DeleteItem(s.DefaultListID(), id)
-}
-
-func (s *Store) ClearCompleted() (int, error) {
-	return s.ClearCompletedItems(s.DefaultListID())
-}
-
 func (s *Store) DefaultListID() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -37,8 +37,6 @@ docker compose down -v     # usuwa też dane listy zakupów
 - `ADDR` - adres serwera HTTP, domyślnie `:8080`.
 - `DB_PATH` - ścieżka do pliku SQLite, domyślnie `data/shopping-list.sqlite`.
 
-`DATA_FILE` jest nadal akceptowane jako awaryjny fallback konfiguracji, ale nowe uruchomienia powinny używać `DB_PATH`.
-
 Przykład:
 
 ```sh
@@ -164,49 +162,6 @@ Usuwa pozycję z wybranej listy. Przy powodzeniu zwraca status `204 No Content`.
 ### `POST /api/lists/{listID}/items/clear-completed`
 
 Usuwa wszystkie kupione pozycje z wybranej listy.
-
-```json
-{"removed":2}
-```
-
-## Kompatybilne endpointy
-
-Endpointy `/api/items` nadal działają na pierwszej/domyślnej liście, ale frontend używa nowych endpointów per lista.
-
-### `GET /api/items`
-
-Zwraca pozycje pierwszej/domyślnej listy.
-
-### `POST /api/items`
-
-Dodaje pozycję do pierwszej/domyślnej listy.
-
-```json
-{
-  "name": "Pomidory",
-  "note": "1 kg"
-}
-```
-
-### `PATCH /api/items/{id}`
-
-Aktualizuje pozycję z pierwszej/domyślnej listy. Można przekazać dowolny zestaw pól:
-
-```json
-{
-  "name": "Pomidory koktajlowe",
-  "note": "2 opakowania",
-  "completed": true
-}
-```
-
-### `DELETE /api/items/{id}`
-
-Usuwa pozycję. Przy powodzeniu zwraca status `204 No Content`.
-
-### `POST /api/items/clear-completed`
-
-Usuwa wszystkie kupione pozycje z pierwszej/domyślnej listy.
 
 ```json
 {"removed":2}

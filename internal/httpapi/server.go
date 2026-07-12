@@ -33,8 +33,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/events", s.events)
 	mux.HandleFunc("/api/lists", s.lists)
 	mux.HandleFunc("/api/lists/", s.listByID)
-	mux.HandleFunc("/api/items", s.items)
-	mux.HandleFunc("/api/items/", s.itemByID)
 	mux.Handle("/", s.static)
 	return s.recover(mux)
 }
@@ -216,75 +214,6 @@ func (s *Server) clearListCompleted(w http.ResponseWriter, r *http.Request, list
 		return
 	}
 	removed, err := s.store.ClearCompletedItems(listID)
-	if err != nil {
-		writeStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]int{"removed": removed})
-}
-
-func (s *Server) items(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		writeJSON(w, http.StatusOK, s.store.List())
-	case http.MethodPost:
-		var input store.CreateItem
-		if !decodeJSON(w, r, &input) {
-			return
-		}
-		item, err := s.store.Create(input)
-		if err != nil {
-			writeStoreError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusCreated, item)
-	default:
-		methodNotAllowed(w, http.MethodGet, http.MethodPost)
-	}
-}
-
-func (s *Server) itemByID(w http.ResponseWriter, r *http.Request) {
-	clean := path.Clean(r.URL.Path)
-	if clean == "/api/items/clear-completed" {
-		s.clearCompleted(w, r)
-		return
-	}
-
-	id := strings.TrimPrefix(clean, "/api/items/")
-	if id == "" || strings.Contains(id, "/") {
-		http.NotFound(w, r)
-		return
-	}
-
-	switch r.Method {
-	case http.MethodPatch:
-		var input store.UpdateItem
-		if !decodeJSON(w, r, &input) {
-			return
-		}
-		item, err := s.store.Update(id, input)
-		if err != nil {
-			writeStoreError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, item)
-	case http.MethodDelete:
-		if err := s.store.Delete(id); err != nil {
-			writeStoreError(w, err)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	default:
-		methodNotAllowed(w, http.MethodPatch, http.MethodDelete)
-	}
-}
-
-func (s *Server) clearCompleted(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		methodNotAllowed(w, http.MethodPost)
-		return
-	}
-	removed, err := s.store.ClearCompleted()
 	if err != nil {
 		writeStoreError(w, err)
 		return

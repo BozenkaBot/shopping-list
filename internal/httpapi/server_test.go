@@ -15,35 +15,6 @@ import (
 	"lista-zakupow/internal/store"
 )
 
-func TestAPIItemsLifecycle(t *testing.T) {
-	handler := newTestHandler(t)
-
-	item := requestJSON[store.Item](t, handler, http.MethodPost, "/api/items", `{"name":"Kawa","note":"250 g"}`, http.StatusCreated)
-	if item.ID == "" || item.Name != "Kawa" || item.Note != "250 g" {
-		t.Fatalf("created item = %+v", item)
-	}
-
-	items := requestJSON[[]store.Item](t, handler, http.MethodGet, "/api/items", "", http.StatusOK)
-	if len(items) != 1 {
-		t.Fatalf("GET items len = %d, want 1", len(items))
-	}
-
-	updated := requestJSON[store.Item](t, handler, http.MethodPatch, "/api/items/"+item.ID, `{"completed":true}`, http.StatusOK)
-	if !updated.Completed {
-		t.Fatalf("updated item = %+v", updated)
-	}
-
-	clear := requestJSON[map[string]int](t, handler, http.MethodPost, "/api/items/clear-completed", "", http.StatusOK)
-	if clear["removed"] != 1 {
-		t.Fatalf("clear response = %+v", clear)
-	}
-
-	items = requestJSON[[]store.Item](t, handler, http.MethodGet, "/api/items", "", http.StatusOK)
-	if len(items) != 0 {
-		t.Fatalf("GET items after clear = %+v", items)
-	}
-}
-
 func TestAPIListsAndScopedItemsLifecycle(t *testing.T) {
 	handler := newTestHandler(t)
 
@@ -189,8 +160,6 @@ func TestListEventsTimeoutDoesNotBreakNextPoll(t *testing.T) {
 func TestAPIErrors(t *testing.T) {
 	handler := newTestHandler(t)
 
-	requestJSON[map[string]string](t, handler, http.MethodPost, "/api/items", `{"name":" "}`, http.StatusBadRequest)
-	requestJSON[map[string]string](t, handler, http.MethodPatch, "/api/items/missing", `{"completed":true}`, http.StatusNotFound)
 	requestJSON[map[string]string](t, handler, http.MethodGet, "/api/lists/missing/items", "", http.StatusNotFound)
 }
 
