@@ -314,6 +314,11 @@ function renderItem(item) {
   node.classList.toggle("is-editing", state.editingId === item.id);
 
   const checkbox = node.querySelector(".item-check");
+  const visual = document.createElement("div");
+  visual.className = "item-visual";
+  visual.setAttribute("aria-hidden", "true");
+  visual.textContent = visualForItem(item.name);
+  checkbox.closest(".check-wrap").after(visual);
   const name = node.querySelector(".item-name");
   const note = node.querySelector(".item-note");
   const editForm = node.querySelector(".edit-form");
@@ -370,6 +375,28 @@ function saveEdit(id, nameInput, noteInput) {
 
   state.editingId = null;
   updateItem(id, { name, note });
+}
+
+function visualForItem(name) {
+  const text = name.toLocaleLowerCase("pl-PL");
+  const dictionary = [
+    [/kaw|coffee/, "C"],
+    [/chleb|bread|buł|bul/, "B"],
+    [/mlek|milk/, "M"],
+    [/wod|water/, "W"],
+    [/pomid|tomat/, "T"],
+    [/banan/, "B"],
+    [/jaj|egg/, "O"],
+    [/ser|cheese/, "S"],
+    [/szyn|ham/, "H"],
+    [/makaron|pasta/, "P"],
+    [/papier|toalet/, "O"],
+    [/żel|zel|myd|soap|szampon/, "S"],
+  ];
+  const match = dictionary.find(([pattern]) => pattern.test(text));
+  if (match) return match[1];
+  const letter = [...name.trim()][0] || "•";
+  return letter.toLocaleUpperCase("pl-PL");
 }
 
 function setBusy(element, busy) {
