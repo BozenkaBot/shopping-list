@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.24-alpine AS build
+FROM golang:1.26.5-alpine AS build
+ENV PATH=/usr/local/go/bin:$PATH
 WORKDIR /src
 
 COPY go.mod go.sum ./
