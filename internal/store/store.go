@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -26,7 +27,8 @@ var (
 )
 
 type DataFile struct {
-	Lists []ShoppingList `json:"lists"`
+	Version uint64         `json:"version"`
+	Lists   []ShoppingList `json:"lists"`
 }
 
 type ShoppingList struct {
@@ -43,8 +45,14 @@ type ListSummary struct {
 	TotalCount int       `json:"totalCount"`
 	OpenCount  int       `json:"openCount"`
 	DoneCount  int       `json:"doneCount"`
+	Version    uint64    `json:"version"`
 	CreatedAt  time.Time `json:"createdAt"`
 	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+type ItemsSnapshot struct {
+	Items   []Item `json:"items"`
+	Version uint64 `json:"version"`
 }
 
 type Item struct {
@@ -79,6 +87,8 @@ type Store struct {
 	mu       sync.Mutex
 	filePath string
 	lists    []ShoppingList
+	version  uint64
+	waiters  map[chan struct{}]struct{}
 	now      func() time.Time
 	newID    func() (string, error)
 }
@@ -90,6 +100,8 @@ func New(filePath string) (*Store, error) {
 
 	s := &Store{
 		filePath: filePath,
+		version:  1,
+		waiters:  make(map[chan struct{}]struct{}),
 		now:      func() time.Time { return time.Now().UTC() },
 		newID:    randomID,
 	}
@@ -103,7 +115,7 @@ func (s *Store) Lists() []ListSummary {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return summarizeLists(s.lists)
+	return summarizeLists(s.lists, s.version)
 }
 
 func (s *Store) CreateList(input CreateList) (ListSummary, error) {
@@ -129,13 +141,17 @@ func (s *Store) CreateList(input CreateList) (ListSummary, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	previousVersion := s.version
 	s.lists = append(s.lists, list)
+	s.version++
 	if err := s.saveLocked(); err != nil {
 		s.lists = s.lists[:len(s.lists)-1]
+		s.version = previousVersion
 		return ListSummary{}, err
 	}
+	s.notifyLocked()
 
-	return summarizeList(list), nil
+	return summarizeList(list, s.version), nil
 }
 
 func (s *Store) UpdateList(id string, patch UpdateList) (ListSummary, error) {
@@ -160,14 +176,18 @@ func (s *Store) UpdateList(id string, patch UpdateList) (ListSummary, error) {
 	}
 
 	previous := s.lists[index]
+	previousVersion := s.version
 	s.lists[index].Name = name
 	s.lists[index].UpdatedAt = s.now()
+	s.version++
 	if err := s.saveLocked(); err != nil {
 		s.lists[index] = previous
+		s.version = previousVersion
 		return ListSummary{}, err
 	}
+	s.notifyLocked()
 
-	return summarizeList(s.lists[index]), nil
+	return summarizeList(s.lists[index], s.version), nil
 }
 
 func (s *Store) DeleteList(id string) error {
@@ -185,6 +205,7 @@ func (s *Store) DeleteList(id string) error {
 	}
 
 	previous := cloneLists(s.lists)
+	previousVersion := s.version
 	s.lists = append(s.lists[:index], s.lists[index+1:]...)
 	if len(s.lists) == 0 {
 		list, err := s.defaultListLocked()
@@ -194,18 +215,21 @@ func (s *Store) DeleteList(id string) error {
 		}
 		s.lists = []ShoppingList{list}
 	}
+	s.version++
 	if err := s.saveLocked(); err != nil {
 		s.lists = previous
+		s.version = previousVersion
 		return err
 	}
+	s.notifyLocked()
 
 	return nil
 }
 
-func (s *Store) ListItems(listID string) ([]Item, error) {
+func (s *Store) ListItemsSnapshot(listID string) (ItemsSnapshot, error) {
 	listID = strings.TrimSpace(listID)
 	if listID == "" {
-		return nil, ErrBadListID
+		return ItemsSnapshot{}, ErrBadListID
 	}
 
 	s.mu.Lock()
@@ -213,9 +237,20 @@ func (s *Store) ListItems(listID string) ([]Item, error) {
 
 	index := s.listIndexLocked(listID)
 	if index == -1 {
-		return nil, ErrListNotFound
+		return ItemsSnapshot{}, ErrListNotFound
 	}
-	return cloneItems(s.lists[index].Items), nil
+	return ItemsSnapshot{
+		Items:   cloneItems(s.lists[index].Items),
+		Version: s.version,
+	}, nil
+}
+
+func (s *Store) ListItems(listID string) ([]Item, error) {
+	snapshot, err := s.ListItemsSnapshot(listID)
+	if err != nil {
+		return nil, err
+	}
+	return snapshot.Items, nil
 }
 
 func (s *Store) CreateItem(listID string, input CreateItem) (Item, error) {
@@ -251,12 +286,16 @@ func (s *Store) CreateItem(listID string, input CreateItem) (Item, error) {
 	}
 
 	previous := cloneLists(s.lists)
+	previousVersion := s.version
 	s.lists[index].Items = append(s.lists[index].Items, item)
 	s.lists[index].UpdatedAt = now
+	s.version++
 	if err := s.saveLocked(); err != nil {
 		s.lists = previous
+		s.version = previousVersion
 		return Item{}, err
 	}
+	s.notifyLocked()
 
 	return item, nil
 }
@@ -287,6 +326,7 @@ func (s *Store) UpdateItem(listID, itemID string, patch UpdateItem) (Item, error
 	}
 
 	previous := cloneLists(s.lists)
+	previousVersion := s.version
 	next := s.lists[listIndex].Items[itemIndex]
 	if patch.Name != nil {
 		name := strings.TrimSpace(*patch.Name)
@@ -306,10 +346,13 @@ func (s *Store) UpdateItem(listID, itemID string, patch UpdateItem) (Item, error
 
 	s.lists[listIndex].Items[itemIndex] = next
 	s.lists[listIndex].UpdatedAt = now
+	s.version++
 	if err := s.saveLocked(); err != nil {
 		s.lists = previous
+		s.version = previousVersion
 		return Item{}, err
 	}
+	s.notifyLocked()
 
 	return next, nil
 }
@@ -337,12 +380,16 @@ func (s *Store) DeleteItem(listID, itemID string) error {
 	}
 
 	previous := cloneLists(s.lists)
+	previousVersion := s.version
 	s.lists[listIndex].Items = append(s.lists[listIndex].Items[:itemIndex], s.lists[listIndex].Items[itemIndex+1:]...)
 	s.lists[listIndex].UpdatedAt = s.now()
+	s.version++
 	if err := s.saveLocked(); err != nil {
 		s.lists = previous
+		s.version = previousVersion
 		return err
 	}
+	s.notifyLocked()
 
 	return nil
 }
@@ -362,6 +409,7 @@ func (s *Store) ClearCompletedItems(listID string) (int, error) {
 	}
 
 	previous := cloneLists(s.lists)
+	previousVersion := s.version
 	items := s.lists[listIndex].Items
 	next := items[:0]
 	removed := 0
@@ -378,12 +426,56 @@ func (s *Store) ClearCompletedItems(listID string) (int, error) {
 
 	s.lists[listIndex].Items = next
 	s.lists[listIndex].UpdatedAt = s.now()
+	s.version++
 	if err := s.saveLocked(); err != nil {
 		s.lists = previous
+		s.version = previousVersion
 		return 0, err
 	}
+	s.notifyLocked()
 
 	return removed, nil
+}
+
+func (s *Store) WaitForVersion(ctx context.Context, listID string, since uint64, timeout time.Duration) (uint64, error) {
+	listID = strings.TrimSpace(listID)
+	if listID == "" {
+		return 0, ErrBadListID
+	}
+
+	s.mu.Lock()
+	if s.listIndexLocked(listID) == -1 {
+		s.mu.Unlock()
+		return 0, ErrListNotFound
+	}
+	if s.version > since {
+		version := s.version
+		s.mu.Unlock()
+		return version, nil
+	}
+	ch := make(chan struct{})
+	s.waiters[ch] = struct{}{}
+	s.mu.Unlock()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	defer func() {
+		s.mu.Lock()
+		delete(s.waiters, ch)
+		s.mu.Unlock()
+	}()
+
+	select {
+	case <-ch:
+	case <-timer.C:
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+
+	s.mu.Lock()
+	version := s.version
+	s.mu.Unlock()
+	return version, nil
 }
 
 func (s *Store) List() []Item {
@@ -433,6 +525,9 @@ func (s *Store) load() error {
 
 	var document DataFile
 	if err := json.Unmarshal(data, &document); err == nil && document.Lists != nil {
+		if document.Version > 0 {
+			s.version = document.Version
+		}
 		s.lists = normalizeLists(document.Lists)
 		return s.ensureDefaultListLocked()
 	}
@@ -459,7 +554,7 @@ func (s *Store) saveLocked() error {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 
-	data, err := json.MarshalIndent(DataFile{Lists: s.lists}, "", "  ")
+	data, err := json.MarshalIndent(DataFile{Version: s.version, Lists: s.lists}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode data file: %w", err)
 	}
@@ -493,6 +588,13 @@ func (s *Store) saveLocked() error {
 	}
 
 	return nil
+}
+
+func (s *Store) notifyLocked() {
+	for ch := range s.waiters {
+		close(ch)
+		delete(s.waiters, ch)
+	}
 }
 
 func (s *Store) ensureDefaultListLocked() error {
@@ -531,15 +633,15 @@ func (s *Store) listIndexLocked(id string) int {
 	return -1
 }
 
-func summarizeLists(lists []ShoppingList) []ListSummary {
+func summarizeLists(lists []ShoppingList, version uint64) []ListSummary {
 	out := make([]ListSummary, len(lists))
 	for i := range lists {
-		out[i] = summarizeList(lists[i])
+		out[i] = summarizeList(lists[i], version)
 	}
 	return out
 }
 
-func summarizeList(list ShoppingList) ListSummary {
+func summarizeList(list ShoppingList, version uint64) ListSummary {
 	done := 0
 	for _, item := range list.Items {
 		if item.Completed {
@@ -553,6 +655,7 @@ func summarizeList(list ShoppingList) ListSummary {
 		TotalCount: total,
 		OpenCount:  total - done,
 		DoneCount:  done,
+		Version:    version,
 		CreatedAt:  list.CreatedAt,
 		UpdatedAt:  list.UpdatedAt,
 	}

@@ -5,6 +5,9 @@ const state = {
   items: [],
   activeListId: window.localStorage.getItem(activeListStorageKey) || null,
   editingId: null,
+  version: 0,
+  pollController: null,
+  pollRetryTimer: null,
 };
 
 const els = {
@@ -65,8 +68,13 @@ function itemsPath() {
   return `/api/lists/${encodeURIComponent(list.id)}/items`;
 }
 
+function activeVersion() {
+  return activeList()?.version || state.version || 0;
+}
+
 async function loadLists(preferredListId = state.activeListId) {
   state.lists = await api("/api/lists");
+  state.version = state.lists[0]?.version || state.version || 0;
   const preferred = state.lists.find((list) => list.id === preferredListId);
   state.activeListId = (preferred || state.lists[0] || {}).id || null;
   if (state.activeListId) {
@@ -83,14 +91,26 @@ async function loadItems() {
     render();
     return;
   }
-  state.items = await api(`/api/lists/${encodeURIComponent(list.id)}/items`);
+  const draft = readEditingDraft();
+  const payload = await api(`/api/lists/${encodeURIComponent(list.id)}/items`);
+  if (Array.isArray(payload)) {
+    state.items = payload;
+  } else {
+    state.items = payload.items || [];
+    state.version = payload.version || state.version;
+    list.version = state.version;
+  }
   render();
+  restoreEditingDraft(draft);
 }
 
-async function refresh(preferredListId = state.activeListId) {
+async function refresh(preferredListId = state.activeListId, options = {}) {
   try {
     await loadLists(preferredListId);
     await loadItems();
+    if (options.restartPolling !== false) {
+      startLongPolling();
+    }
   } catch (error) {
     showMessage(error.message, true);
   }
@@ -102,6 +122,7 @@ async function selectList(id) {
   state.editingId = null;
   window.localStorage.setItem(activeListStorageKey, id);
   await loadItems();
+  startLongPolling();
 }
 
 async function createList(event) {
@@ -165,6 +186,55 @@ async function deleteActiveList() {
     await refresh();
   } catch (error) {
     showMessage(error.message, true);
+  }
+}
+
+function startLongPolling() {
+  stopLongPolling();
+
+  const list = activeList();
+  if (!list) return;
+
+  const controller = new AbortController();
+  state.pollController = controller;
+  pollList(list.id, activeVersion(), controller);
+}
+
+function stopLongPolling() {
+  if (state.pollRetryTimer) {
+    window.clearTimeout(state.pollRetryTimer);
+    state.pollRetryTimer = null;
+  }
+  if (state.pollController) {
+    state.pollController.abort();
+    state.pollController = null;
+  }
+}
+
+async function pollList(listId, since, controller) {
+  try {
+    const event = await api(`/api/lists/${encodeURIComponent(listId)}/events?since=${encodeURIComponent(since)}`, {
+      signal: controller.signal,
+    });
+    if (controller.signal.aborted || state.activeListId !== listId) return;
+
+    const nextVersion = event.version || state.version;
+    if (nextVersion > since) {
+      state.version = nextVersion;
+      await refresh(listId, { restartPolling: false });
+    }
+    if (!controller.signal.aborted && state.activeListId === listId) {
+      pollList(listId, activeVersion(), controller);
+    }
+  } catch (error) {
+    if (controller.signal.aborted || error.name === "AbortError") return;
+    if (state.activeListId !== listId) return;
+
+    state.pollRetryTimer = window.setTimeout(() => {
+      if (!controller.signal.aborted && state.activeListId === listId) {
+        pollList(listId, activeVersion(), controller);
+      }
+    }, 1500);
   }
 }
 
@@ -403,6 +473,33 @@ function setBusy(element, busy) {
   element.classList.toggle("is-busy", busy);
   for (const control of element.querySelectorAll("button, input")) {
     control.disabled = busy;
+  }
+}
+
+function readEditingDraft() {
+  if (!state.editingId) return null;
+  const item = els.itemsList.querySelector(`[data-id="${CSS.escape(state.editingId)}"]`);
+  if (!item) return null;
+  return {
+    id: state.editingId,
+    name: item.querySelector(".edit-name")?.value || "",
+    note: item.querySelector(".edit-note")?.value || "",
+    activeClass: document.activeElement?.className || "",
+  };
+}
+
+function restoreEditingDraft(draft) {
+  if (!draft || state.editingId !== draft.id) return;
+  const item = els.itemsList.querySelector(`[data-id="${CSS.escape(draft.id)}"]`);
+  if (!item) return;
+  const name = item.querySelector(".edit-name");
+  const note = item.querySelector(".edit-note");
+  if (name) name.value = draft.name;
+  if (note) note.value = draft.note;
+  if (String(draft.activeClass).includes("edit-note")) {
+    note?.focus();
+  } else if (String(draft.activeClass).includes("edit-name")) {
+    name?.focus();
   }
 }
 

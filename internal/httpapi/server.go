@@ -6,22 +6,25 @@ import (
 	"log/slog"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
+	"time"
 
 	"lista-zakupow/internal/store"
 )
 
 type Server struct {
-	store  *store.Store
-	static http.Handler
-	logger *slog.Logger
+	store           *store.Store
+	static          http.Handler
+	logger          *slog.Logger
+	longPollTimeout time.Duration
 }
 
 func New(s *store.Store, static http.Handler, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{store: s, static: static, logger: logger}
+	return &Server{store: s, static: static, logger: logger, longPollTimeout: 30 * time.Second}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -95,6 +98,10 @@ func (s *Server) listByID(w http.ResponseWriter, r *http.Request) {
 		s.listItems(w, r, listID)
 		return
 	}
+	if rest == "events" {
+		s.listEvents(w, r, listID)
+		return
+	}
 	if rest == "items/clear-completed" {
 		s.clearListCompleted(w, r, listID)
 		return
@@ -115,12 +122,12 @@ func (s *Server) listByID(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listItems(w http.ResponseWriter, r *http.Request, listID string) {
 	switch r.Method {
 	case http.MethodGet:
-		items, err := s.store.ListItems(listID)
+		snapshot, err := s.store.ListItemsSnapshot(listID)
 		if err != nil {
 			writeStoreError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, items)
+		writeJSON(w, http.StatusOK, snapshot)
 	case http.MethodPost:
 		var input store.CreateItem
 		if !decodeJSON(w, r, &input) {
@@ -135,6 +142,29 @@ func (s *Server) listItems(w http.ResponseWriter, r *http.Request, listID string
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
+}
+
+func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, listID string) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+
+	since, err := parseVersion(r.URL.Query().Get("since"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Niepoprawna wersja.")
+		return
+	}
+
+	version, err := s.store.WaitForVersion(r.Context(), listID, since, s.longPollTimeout)
+	if err != nil {
+		if errors.Is(err, store.ErrBadListID) || errors.Is(err, store.ErrListNotFound) {
+			writeStoreError(w, err)
+			return
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]uint64{"version": version})
 }
 
 func (s *Server) listItemByID(w http.ResponseWriter, r *http.Request, listID, itemID string) {
@@ -253,6 +283,13 @@ func parseListPath(rawPath string) (string, string, bool) {
 		return "", "", false
 	}
 	return parts[0], strings.Join(parts[1:], "/"), true
+}
+
+func parseVersion(raw string) (uint64, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	return strconv.ParseUint(raw, 10, 64)
 }
 
 func (s *Server) recover(next http.Handler) http.Handler {

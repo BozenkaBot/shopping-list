@@ -6,6 +6,8 @@ Frontend jest napisany w HTML, CSS i vanilla JavaScript. Backend używa tylko st
 
 Aplikacja obsługuje wiele kontekstów zakupowych, np. `Dom`, `Weekend`, `Grill` albo `Działka`. Każda lista ma własne pozycje, liczniki i operacje dodawania, edycji, oznaczania jako kupione, usuwania oraz czyszczenia kupionych.
 
+Widok aktywnej listy odświeża się automatycznie przez long polling. Gdy ktoś na innym urządzeniu doda, usunie albo zaktualizuje pozycję, zmieni nazwę listy lub wyczyści kupione pozycje, otwarta lista pobierze aktualne metadane i pozycje bez ręcznego odświeżania strony.
+
 ## Uruchomienie lokalne
 
 ```sh
@@ -65,6 +67,7 @@ Zwraca listy z metadanymi i licznikami.
     "totalCount": 3,
     "openCount": 2,
     "doneCount": 1,
+    "version": 12,
     "createdAt": "2026-07-11T12:00:00Z",
     "updatedAt": "2026-07-11T12:00:00Z"
   }
@@ -97,7 +100,33 @@ Usuwa listę. Aplikacja nie zostawia pustego zbioru list: po usunięciu ostatnie
 
 ### `GET /api/lists/{listID}/items`
 
-Zwraca pozycje wybranej listy.
+Zwraca pozycje wybranej listy oraz aktualną wersję danych.
+
+```json
+{
+  "items": [
+    {
+      "id": "item-1",
+      "name": "Pomidory",
+      "note": "1 kg",
+      "completed": false,
+      "createdAt": "2026-07-11T12:00:00Z",
+      "updatedAt": "2026-07-11T12:00:00Z"
+    }
+  ],
+  "version": 12
+}
+```
+
+### `GET /api/lists/{listID}/events?since=<version>`
+
+Long-poll endpoint dla aktywnej listy. Jeśli aktualna wersja danych jest większa niż `since`, odpowiada od razu:
+
+```json
+{"version":13}
+```
+
+Jeśli nie ma zmian, request czeka do około 30 sekund albo do kolejnej mutacji. Po timeout zwraca bieżącą wersję w tym samym formacie. Zerwanie połączenia przez klienta przerywa oczekiwanie po stronie serwera.
 
 ### `POST /api/lists/{listID}/items`
 
