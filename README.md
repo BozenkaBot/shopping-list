@@ -2,11 +2,11 @@
 
 Prosta aplikacja webowa w Go do współdzielonych, nazwanych list zakupów. Na tym etapie nie ma autoryzacji: każdy użytkownik widzi i edytuje te same listy.
 
-Frontend jest napisany w HTML, CSS i vanilla JavaScript. Backend używa tylko standard library Go. Dane są zapisywane lokalnie w pliku JSON z mutexem oraz atomowym zapisem przez plik tymczasowy i `rename`.
+Frontend jest napisany w HTML, CSS i vanilla JavaScript. Backend zapisuje dane w lokalnej bazie SQLite. Każda zmiana dopisuje zdarzenie do append-only tabeli `events`, a aktualny stan list i pozycji jest trzymany w projekcjach `lists` oraz `items` do szybkich odczytów.
 
 Aplikacja obsługuje wiele kontekstów zakupowych, np. `Dom`, `Weekend`, `Grill` albo `Działka`. Każda lista ma własne pozycje, liczniki i operacje dodawania, edycji, oznaczania jako kupione, usuwania oraz czyszczenia kupionych.
 
-Widok aktywnej listy odświeża się automatycznie przez long polling. Gdy ktoś na innym urządzeniu doda, usunie albo zaktualizuje pozycję, zmieni nazwę listy lub wyczyści kupione pozycje, otwarta lista pobierze aktualne metadane i pozycje bez ręcznego odświeżania strony.
+Widok aktywnej listy odświeża się automatycznie przez long polling. Gdy ktoś na innym urządzeniu doda, usunie albo zaktualizuje pozycję, zmieni nazwę listy lub wyczyści kupione pozycje, otwarta lista pobierze aktualne metadane i pozycje bez ręcznego odświeżania strony. Wersje odpowiedzi są oparte o identyfikatory zdarzeń SQLite, co daje podstawę pod przyszłą synchronizację offline między urządzeniami.
 
 ## Uruchomienie lokalne
 
@@ -35,12 +35,14 @@ docker compose down -v     # usuwa też dane listy zakupów
 ## Konfiguracja
 
 - `ADDR` - adres serwera HTTP, domyślnie `:8080`.
-- `DATA_FILE` - ścieżka do pliku JSON z listami, domyślnie `data/shopping-list.json`.
+- `DB_PATH` - ścieżka do pliku SQLite, domyślnie `data/shopping-list.sqlite`.
+
+`DATA_FILE` jest nadal akceptowane jako awaryjny fallback konfiguracji, ale nowe uruchomienia powinny używać `DB_PATH`.
 
 Przykład:
 
 ```sh
-ADDR=:3000 DATA_FILE=/tmp/lista.json go run ./cmd/server
+ADDR=:3000 DB_PATH=/tmp/lista.sqlite go run ./cmd/server
 ```
 
 ## API
@@ -127,6 +129,10 @@ Long-poll endpoint dla aktywnej listy. Jeśli aktualna wersja danych jest więks
 ```
 
 Jeśli nie ma zmian, request czeka do około 30 sekund albo do kolejnej mutacji. Po timeout zwraca bieżącą wersję w tym samym formacie. Zerwanie połączenia przez klienta przerywa oczekiwanie po stronie serwera.
+
+### `GET /api/events?since=<version>`
+
+Zwraca surowe zdarzenia z append-only logu po podanej wersji. Endpoint jest pomocniczy pod debugowanie i przyszłą synchronizację offline.
 
 ### `POST /api/lists/{listID}/items`
 

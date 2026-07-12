@@ -1,20 +1,40 @@
 package store
 
 import (
-	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
 
-func TestStoreListsItemsAreScopedAndPersisted(t *testing.T) {
-	filePath := filepath.Join(t.TempDir(), "data", "shopping-list.json")
-	s, err := New(filePath)
+func TestStoreCreatesDefaultListOnEmptyDB(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "data", "shopping-list.sqlite")
+	s, err := New(dbPath)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	defer s.Close()
+
+	lists := s.Lists()
+	if len(lists) != 1 || lists[0].Name != DefaultListName || lists[0].Version == 0 {
+		t.Fatalf("Lists() = %+v", lists)
+	}
+	events, err := s.EventsSince(0)
+	if err != nil {
+		t.Fatalf("EventsSince() error = %v", err)
+	}
+	if len(events) != 1 || events[0].Type != "list_created" {
+		t.Fatalf("default events = %+v", events)
+	}
+}
+
+func TestStoreListsItemsAreScopedAndPersisted(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "data", "shopping-list.sqlite")
+	s, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer s.Close()
 	s.now = fixedClock()
 	s.newID = sequenceID("home", "weekend", "item-home", "item-weekend")
 
@@ -64,10 +84,25 @@ func TestStoreListsItemsAreScopedAndPersisted(t *testing.T) {
 		t.Fatalf("weekend items = %+v", weekendItems)
 	}
 
-	reloaded, err := New(filePath)
+	events, err := s.EventsSince(0)
+	if err != nil {
+		t.Fatalf("EventsSince() error = %v", err)
+	}
+	if len(events) != 6 {
+		t.Fatalf("event count = %d, want 6; events = %+v", len(events), events)
+	}
+	if events[len(events)-1].Type != "item_updated" {
+		t.Fatalf("last event = %+v", events[len(events)-1])
+	}
+
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	reloaded, err := New(dbPath)
 	if err != nil {
 		t.Fatalf("reload New() error = %v", err)
 	}
+	defer reloaded.Close()
 	lists := reloaded.Lists()
 	if len(lists) != 3 {
 		t.Fatalf("reloaded lists len = %d, want 3; lists = %+v", len(lists), lists)
@@ -86,26 +121,15 @@ func TestStoreListsItemsAreScopedAndPersisted(t *testing.T) {
 	if len(weekendItems) != 0 {
 		t.Fatalf("weekend items after delete = %+v", weekendItems)
 	}
-
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		t.Fatalf("ReadFile() error = %v", err)
-	}
-	var persisted DataFile
-	if err := json.Unmarshal(data, &persisted); err != nil {
-		t.Fatalf("persisted JSON invalid: %v", err)
-	}
-	if len(persisted.Lists) != 3 || persisted.Lists[1].Items[0].Name != name {
-		t.Fatalf("persisted data = %+v", persisted)
-	}
 }
 
 func TestStoreValidationClearCompletedAndDeleteLastList(t *testing.T) {
-	filePath := filepath.Join(t.TempDir(), "shopping-list.json")
-	s, err := New(filePath)
+	dbPath := filepath.Join(t.TempDir(), "shopping-list.sqlite")
+	s, err := New(dbPath)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	defer s.Close()
 	s.now = fixedClock()
 	s.newID = sequenceID("a", "b", "replacement")
 	defaultID := s.DefaultListID()
@@ -152,50 +176,13 @@ func TestStoreValidationClearCompletedAndDeleteLastList(t *testing.T) {
 	if lists[0].ID == defaultID {
 		t.Fatalf("replacement list reused deleted id %q", defaultID)
 	}
-}
-
-func TestStoreMigratesLegacyItems(t *testing.T) {
-	filePath := filepath.Join(t.TempDir(), "shopping-list.json")
-	legacyItems := []Item{{
-		ID:        "legacy-item",
-		Name:      "Makaron",
-		CreatedAt: fixedClock()(),
-		UpdatedAt: fixedClock()(),
-	}}
-	data, err := json.Marshal(legacyItems)
+	events, err := s.EventsSince(0)
 	if err != nil {
-		t.Fatalf("Marshal() error = %v", err)
+		t.Fatalf("EventsSince() error = %v", err)
 	}
-	if err := os.WriteFile(filePath, data, 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-
-	s, err := New(filePath)
-	if err != nil {
-		t.Fatalf("New(legacy) error = %v", err)
-	}
-	lists := s.Lists()
-	if len(lists) != 1 || lists[0].Name != DefaultListName || lists[0].TotalCount != 1 {
-		t.Fatalf("migrated lists = %+v", lists)
-	}
-	items, err := s.ListItems(lists[0].ID)
-	if err != nil {
-		t.Fatalf("ListItems(migrated) error = %v", err)
-	}
-	if len(items) != 1 || items[0].ID != "legacy-item" {
-		t.Fatalf("migrated items = %+v", items)
-	}
-
-	persisted, err := os.ReadFile(filePath)
-	if err != nil {
-		t.Fatalf("ReadFile() error = %v", err)
-	}
-	var document DataFile
-	if err := json.Unmarshal(persisted, &document); err != nil {
-		t.Fatalf("persisted migrated JSON invalid: %v", err)
-	}
-	if len(document.Lists) != 1 || len(document.Lists[0].Items) != 1 {
-		t.Fatalf("persisted migrated document = %+v", document)
+	lastTwo := events[len(events)-2:]
+	if lastTwo[0].Type != "list_deleted" || lastTwo[1].Type != "list_created" {
+		t.Fatalf("delete-last events = %+v", lastTwo)
 	}
 }
 

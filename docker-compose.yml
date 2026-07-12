@@ -4,7 +4,7 @@ services:
     container_name: lista-zakupow
     environment:
       ADDR: ":8080"
-      DATA_FILE: "/data/shopping-list.json"
+      DB_PATH: "/data/shopping-list.sqlite"
     ports:
       - "8080:8080"
     volumes:

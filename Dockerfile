@@ -3,7 +3,7 @@
 FROM golang:1.24-alpine AS build
 WORKDIR /src
 
-COPY go.mod ./
+COPY go.mod go.sum ./
 COPY cmd ./cmd
 COPY internal ./internal
 COPY web ./web
@@ -21,7 +21,7 @@ RUN mkdir -p /data && chown -R app:app /data /app
 USER app
 
 ENV ADDR=:8080
-ENV DATA_FILE=/data/shopping-list.json
+ENV DB_PATH=/data/shopping-list.sqlite
 
 EXPOSE 8080
 VOLUME ["/data"]

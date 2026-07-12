@@ -202,10 +202,11 @@ func newTestHandler(t *testing.T) http.Handler {
 func newTestAPI(t *testing.T) *Server {
 	t.Helper()
 
-	s, err := store.New(filepath.Join(t.TempDir(), "shopping-list.json"))
+	s, err := store.New(filepath.Join(t.TempDir(), "shopping-list.sqlite"))
 	if err != nil {
 		t.Fatalf("store.New() error = %v", err)
 	}
+	t.Cleanup(func() { _ = s.Close() })
 	return New(s, http.NotFoundHandler(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 

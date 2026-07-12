@@ -12,11 +12,11 @@ import (
 
 func main() {
 	addr := getenv("ADDR", ":8080")
-	dataFile := getenv("DATA_FILE", "data/shopping-list.json")
+	dbPath := getenv("DB_PATH", getenv("DATA_FILE", "data/shopping-list.sqlite"))
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	shoppingStore, err := store.New(dataFile)
+	shoppingStore, err := store.New(dbPath)
 	if err != nil {
 		logger.Error("cannot initialize store", "error", err)
 		os.Exit(1)
@@ -31,7 +31,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	logger.Info("server listening", "addr", addr, "data_file", dataFile)
+	logger.Info("server listening", "addr", addr, "db_path", dbPath)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logger.Error("server stopped", "error", err)
 		os.Exit(1)

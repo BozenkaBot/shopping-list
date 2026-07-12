@@ -30,6 +30,7 @@ func New(s *store.Store, static http.Handler, logger *slog.Logger) *Server {
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
+	mux.HandleFunc("/api/events", s.events)
 	mux.HandleFunc("/api/lists", s.lists)
 	mux.HandleFunc("/api/lists/", s.listByID)
 	mux.HandleFunc("/api/items", s.items)
@@ -40,6 +41,24 @@ func (s *Server) Routes() http.Handler {
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) events(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	since, err := parseVersion(r.URL.Query().Get("since"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Niepoprawna wersja.")
+		return
+	}
+	events, err := s.store.EventsSince(since)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, events)
 }
 
 func (s *Server) lists(w http.ResponseWriter, r *http.Request) {
